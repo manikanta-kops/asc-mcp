@@ -1,8 +1,8 @@
-export type AnalyticsReportCategory = 
-  | 'APP_STORE_ENGAGEMENT' 
-  | 'APP_STORE_COMMERCE' 
-  | 'APP_USAGE' 
-  | 'FRAMEWORKS_USAGE' 
+export type AnalyticsReportCategory =
+  | 'APP_STORE_ENGAGEMENT'
+  | 'COMMERCE'
+  | 'APP_USAGE'
+  | 'FRAMEWORK_USAGE'
   | 'PERFORMANCE';
 
 export type AnalyticsAccessType = 'ONGOING' | 'ONE_TIME_SNAPSHOT';
@@ -69,12 +69,38 @@ export interface AnalyticsReportSegment {
   };
 }
 
+export type AnalyticsReportGranularity = 'DAILY' | 'WEEKLY' | 'MONTHLY';
+
+export interface AnalyticsReportInstance {
+  id: string;
+  type: 'analyticsReportInstances';
+  attributes: {
+    granularity: AnalyticsReportGranularity;
+    processingDate: string; // "YYYY-MM-DD"
+    // Apple sometimes returns additional attributes; keep it loose.
+    [key: string]: any;
+  };
+}
+
+export interface PaginatedResponseLinks {
+  self?: string;
+  next?: string;
+  first?: string;
+}
+
 export interface ListAnalyticsReportsResponse {
   data: AnalyticsReport[];
+  links?: PaginatedResponseLinks;
 }
 
 export interface ListAnalyticsReportSegmentsResponse {
   data: AnalyticsReportSegment[];
+  links?: PaginatedResponseLinks;
+}
+
+export interface ListAnalyticsReportInstancesResponse {
+  data: AnalyticsReportInstance[];
+  links?: PaginatedResponseLinks;
 }
 
 // Sales and Finance Reports Types

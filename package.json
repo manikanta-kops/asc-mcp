@@ -1,17 +1,27 @@
 {
   "name": "appstore-connect-mcp-server",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "build": "tsc && shx chmod +x dist/src/*.js",
-    "start": "node dist/src/index.js"
+    "start": "node dist/src/index.js",
+    "http": "node dist/src/http.js",
+    "server:start": "./scripts/server.sh start",
+    "server:stop": "./scripts/server.sh stop",
+    "server:restart": "./scripts/server.sh restart",
+    "server:status": "./scripts/server.sh status",
+    "server:logs": "./scripts/server.sh logs",
+    "bootstrap:snapshot": "bun scripts/bootstrap-analytics.ts snapshot",
+    "bootstrap:ongoing": "bun scripts/bootstrap-analytics.ts ongoing",
+    "bootstrap:status": "bun scripts/check-bootstrap-status.ts"
   },
   "bin": {
     "appstore-connect-mcp": "./dist/src/index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.15.0",
+    "@modelcontextprotocol/sdk": "^1.27.0",
     "axios": "^1.6.0",
+    "csv-parse": "^6.2.1",
     "jsonwebtoken": "^9.0.0",
     "sharp": "^0.32.0"
   },

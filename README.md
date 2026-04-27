@@ -523,6 +523,74 @@ Download data from an analytics report segment.
 "Download data from https://api.appstoreconnect.apple.com/..."
 ```
 
+### 📈 High-Level Ingest Tools
+
+These two tools do the full Apple chain — `listReports → listInstances → listSegments → download → gunzip → parse` — server-side and return a flat array of structured rows per call. They're intended for daily pipelines (e.g. LeafOS ingest into Supabase); the raw analytics tools above remain available for ad-hoc use.
+
+**Data source resolution.** Engagement reads request IDs from `.state/bootstrap-ongoing.json` and `.state/bootstrap.json`. For each date, ONGOING is tried first; if it has no instance, SNAPSHOT is tried as fallback. Dates that neither source covers produce warnings rather than failing the call. An explicit `request_id` in the input short-circuits the dual-source logic.
+
+**Per-call cap:** 90 days. At that range a call can take ~5 minutes due to Apple's rate limits (3600/hour, ~300/min soft cap). **Set your HTTP client timeout to 360s** when calling these tools at full range.
+
+**Completeness lag:** Apple considers a day complete T+2. The `to` date is auto-clamped to `today - 2` with a warning when callers ask for something more recent.
+
+#### `get_daily_engagement`
+High-level: return daily engagement rows by date × territory × source for a single app.
+
+**Parameters:**
+- `app_id` (required): Apple app id (e.g. `HABBY_APP_ID`)
+- `from` (required): Inclusive start date, `YYYY-MM-DD`
+- `to` (required): Inclusive end date, `YYYY-MM-DD` (auto-clamped to `today - 2`)
+- `request_id` (optional): Explicit `analyticsReportRequests` id — skips the ONGOING/SNAPSHOT fallback
+
+**Output shape:**
+```json
+{
+  "rows": [
+    { "date": "2026-04-20", "app_id": "...", "territory": "US", "source": "App Store Search",
+      "impressions": 1234, "product_page_views": 456, "downloads": 78, "conversion_rate": 0.17 }
+  ],
+  "warnings": [],
+  "meta": {
+    "date_range": { "from": "2026-04-20", "to": "2026-04-22" },
+    "row_count": 1,
+    "apple_report_name": "App Store Discovery and Engagement Detailed",
+    "sources_used": { "ongoing": 3, "snapshot": 0 },
+    "rate_limit_remaining": 3487
+  }
+}
+```
+
+Zero-activity rows are omitted on purpose — downstream decides how to densify. Raw CSV never crosses the wire.
+
+#### `get_daily_sales`
+High-level: return daily sales rows by date × territory for the vendor, optionally filtered to a single `app_id`.
+
+**Parameters:**
+- `from` (required): Inclusive start date, `YYYY-MM-DD`
+- `to` (required): Inclusive end date, `YYYY-MM-DD`
+- `app_id` (optional): Filter to one app. Sales reports return all apps under the vendor key; omitting this returns them all.
+- `vendor_number` (optional): Defaults to `APP_STORE_CONNECT_VENDOR_NUMBER`
+- `version` (optional): Override Apple's sales report version. Default is to omit the parameter (sidesteps Apple's recurring DAILY+version breakage — see forum thread 745052). Fall-back attempts are `1_1` then `1_0`.
+
+**Output shape:**
+```json
+{
+  "rows": [
+    { "date": "2026-04-20", "app_id": "...", "territory": "US",
+      "units": 12, "proceeds_usd": 34.56, "sku": "habby_pro_v1" }
+  ],
+  "warnings": [],
+  "meta": {
+    "vendor_number": "...",
+    "date_range": { "from": "2026-04-20", "to": "2026-04-22" },
+    "row_count": 1,
+    "rate_limit_remaining": 3485
+  }
+}
+```
+
+404 responses with body "no sales for the date specified" become warnings, not failures. Free apps often have empty daily sales — that's expected, not a bug.
+
 ### 💰 Sales & Finance Reports Tools (Requires Vendor Number)
 
 #### `download_sales_report`

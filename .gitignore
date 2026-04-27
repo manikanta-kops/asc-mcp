@@ -74,3 +74,7 @@ Thumbs.db
 # Authentication keys (IMPORTANT!)
 *.p8
 AuthKey_*.p8
+
+# Secrets + runtime state
+.secrets/
+.state/

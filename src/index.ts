@@ -8,19 +8,23 @@ import {
   ErrorCode,
   McpError
 } from "@modelcontextprotocol/sdk/types.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import axios from 'axios';
+import { pathToFileURL } from 'node:url';
 
 import { AppStoreConnectConfig } from './types/index.js';
 import { AppStoreConnectClient } from './services/index.js';
-import { 
-  AppHandlers, 
-  BetaHandlers, 
-  BundleHandlers, 
-  DeviceHandlers, 
-  UserHandlers, 
+import {
+  AppHandlers,
+  BetaHandlers,
+  BundleHandlers,
+  DeviceHandlers,
+  UserHandlers,
   AnalyticsHandlers,
   XcodeHandlers,
-  LocalizationHandlers 
+  LocalizationHandlers,
+  getDailyEngagement,
+  getDailySales,
 } from './handlers/index.js';
 
 // Load environment variables
@@ -31,7 +35,7 @@ const config: AppStoreConnectConfig = {
   vendorNumber: process.env.APP_STORE_CONNECT_VENDOR_NUMBER, // Optional for sales/finance reports
 };
 
-class AppStoreConnectServer {
+export class AppStoreConnectServer {
   private server: Server;
   private client: AppStoreConnectClient;
   private appHandlers: AppHandlers;
@@ -769,7 +773,7 @@ class AppStoreConnectServer {
                 properties: {
                   category: {
                     type: "string",
-                    enum: ["APP_STORE_ENGAGEMENT", "APP_STORE_COMMERCE", "APP_USAGE", "FRAMEWORKS_USAGE", "PERFORMANCE"],
+                    enum: ["APP_STORE_ENGAGEMENT", "COMMERCE", "APP_USAGE", "FRAMEWORK_USAGE", "PERFORMANCE"],
                     description: "Filter by report category"
                   }
                 }
@@ -811,6 +815,37 @@ class AppStoreConnectServer {
             },
             required: ["segmentUrl"]
           }
+        },
+
+        // High-level ingest tools (range, parsed, structured rows)
+        {
+          name: "get_daily_engagement",
+          description: "High-level: return a flat array of daily App Store engagement rows (impressions, product page views, downloads, conversion rate) by date x territory x source for one app over a date range. Chains listAnalyticsReports -> listAnalyticsReportInstances -> listSegmentsForInstance -> download -> gunzip -> csv-parse server-side. ONGOING bootstrap is tried first per date, SNAPSHOT as fallback. Max 90 days per call. Wall time up to ~5 minutes at full range due to Apple rate limits; callers should set a 360s HTTP timeout.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              app_id: { type: "string", description: "Apple app id (e.g. HABBY_APP_ID)" },
+              from: { type: "string", description: "Inclusive start date, YYYY-MM-DD" },
+              to: { type: "string", description: "Inclusive end date, YYYY-MM-DD. Auto-clamped to today-2 (Apple completeness)." },
+              request_id: { type: "string", description: "Optional explicit analyticsReportRequests id. If omitted, reads .state/bootstrap-ongoing.json and .state/bootstrap.json." },
+            },
+            required: ["app_id", "from", "to"],
+          },
+        },
+        {
+          name: "get_daily_sales",
+          description: "High-level: return a flat array of daily sales rows (units, proceeds_usd, sku) by date x territory for the vendor, filtered to app_id if provided. Calls /v1/salesReports per date (gzipped TSV), parses server-side. Omits filter[version] by default to sidestep Apple's recurring DAILY/version breakage; version can be overridden. Max 90 days per call.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              app_id: { type: "string", description: "Optional Apple app id filter. Sales reports cover all apps under the vendor key; filter here." },
+              from: { type: "string", description: "Inclusive start date, YYYY-MM-DD" },
+              to: { type: "string", description: "Inclusive end date, YYYY-MM-DD" },
+              vendor_number: { type: "string", description: "Optional; defaults to APP_STORE_CONNECT_VENDOR_NUMBER env." },
+              version: { type: "string", description: "Optional override, e.g. '1_0' or '1_1'. Default: omit parameter." },
+            },
+            required: ["from", "to"],
+          },
         },
 
         // Xcode Development Tools
@@ -1011,6 +1046,13 @@ class AppStoreConnectServer {
           
           case "download_analytics_report_segment":
             return { toolResult: await this.analyticsHandlers.downloadAnalyticsReportSegment(args as any) };
+
+          // High-level ingest tools
+          case "get_daily_engagement":
+            return formatResponse(await getDailyEngagement(this.client, this.analyticsHandlers, args as any));
+
+          case "get_daily_sales":
+            return formatResponse(await getDailySales(this.client, args as any, config.vendorNumber));
           
           case "download_sales_report":
             if (!config.vendorNumber) {
@@ -1052,13 +1094,24 @@ class AppStoreConnectServer {
     });
   }
 
+  async connect(transport: Transport): Promise<void> {
+    await this.server.connect(transport);
+  }
+
+  async close(): Promise<void> {
+    await this.server.close();
+  }
+
   async run(): Promise<void> {
     const transport = new StdioServerTransport();
-    await this.server.connect(transport);
+    await this.connect(transport);
     console.error("App Store Connect MCP server running on stdio");
   }
 }
 
-// Start the server
-const server = new AppStoreConnectServer();
-server.run().catch(console.error);
+// Only auto-run when this file is the direct entry point (not when imported by src/http.ts).
+const isMainModule = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMainModule) {
+  const server = new AppStoreConnectServer();
+  server.run().catch(console.error);
+}
